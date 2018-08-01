@@ -10,6 +10,7 @@ import asyncio
 import argparse
 import logging
 from datetime import datetime
+from functools import partial
 
 import aiohttp
 import async_timeout
@@ -87,46 +88,52 @@ async def post_number_of_comments(loop, session, fetcher, post_id):
     return number_of_comments
 
 
-async def get_comments_of_top_stories(loop, session, limit, iteration):
+async def get_comments_of_top_stories(loop, limit, iteration):
     """Retrieve top stories in HN.
 
     """
-    fetcher = URLFetcher()  # create a new fetcher for this task
-    response = await fetcher.fetch(session, TOP_STORIES_URL)
-    tasks = [post_number_of_comments(
-        loop, session, fetcher, post_id) for post_id in response[:limit]]
-    results = await asyncio.gather(*tasks)
-    for post_id, num_comments in zip(response[:limit], results):
-        log.info("Post {} has {} comments ({})".format(
-            post_id, num_comments, iteration))
-    return fetcher.fetch_counter  # return the fetch count
+    async with aiohttp.ClientSession(loop=loop) as session:
+        fetcher = URLFetcher()  # create a new fetcher for this task
+        response = await fetcher.fetch(session, TOP_STORIES_URL)
+        tasks = [post_number_of_comments(
+            loop, session, fetcher, post_id) for post_id in response[:limit]]
+        results = await asyncio.gather(*tasks)
+        for post_id, num_comments in zip(response[:limit], results):
+            log.info("Post {} has {} comments ({})".format(
+                post_id, num_comments, iteration))
+        return fetcher.fetch_counter  # return the fetch count
 
 
-async def poll_top_stories_for_comments(loop, session, period, limit):
-    """Periodically poll for new stories and retrieve number of comments.
+def poll_top_stories_for_comments(loop, period, limit, iteration=0):
+    """Periodic function that schedules get_comments_of_top_stories.
 
     """
-    iteration = 1
-    while True:
-        log.info("Calculating comments for top {} stories. ({})".format(
-            limit, iteration))
+    log.info("Calculating comments for top {} stories ({})".format(
+        limit, iteration))
 
-        future = asyncio.ensure_future(
-            get_comments_of_top_stories(loop, session, limit, iteration))
+    future = asyncio.ensure_future(
+        get_comments_of_top_stories(loop, limit, iteration))
 
-        now = datetime.now()
+    now = datetime.now()
 
-        def callback(fut):
-            fetch_count = fut.result()
-            log.info(
-                '> Calculating comments took {:.2f} seconds and {} fetches'.format(
-                    (datetime.now() - now).total_seconds(), fetch_count))
+    def callback(fut):
+        fetch_count = fut.result()
+        log.info(
+            '> Calculating comments took {:.2f} seconds and {} fetches'.format(
+                (datetime.now() - now).total_seconds(), fetch_count))
 
-        future.add_done_callback(callback)
+    future.add_done_callback(callback)
 
-        log.info("Waiting for {} seconds...".format(period))
-        iteration += 1
-        await asyncio.sleep(period)
+    log.info("Waiting for {} seconds...".format(period))
+
+    iteration += 1
+    loop.call_later(
+        period,
+        partial(  # or call_at(loop.time() + period)
+            poll_top_stories_for_comments,
+            loop, period, limit, iteration
+        )
+    )
 
 
 if __name__ == '__main__':
@@ -135,9 +142,11 @@ if __name__ == '__main__':
         log.setLevel(logging.DEBUG)
 
     loop = asyncio.get_event_loop()
-    with aiohttp.ClientSession(loop=loop) as session:
-        loop.run_until_complete(
-            poll_top_stories_for_comments(
-                loop, session, args.period, args.limit))
+
+    # we don't `run_until_complete` anymore, we simply call the function
+    poll_top_stories_for_comments(loop, args.period, args.limit)
+
+    # and run the loop forever
+    loop.run_forever()
 
     loop.close()

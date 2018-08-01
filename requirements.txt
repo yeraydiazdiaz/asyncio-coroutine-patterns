@@ -1,1 +1,2 @@
-aiohttp
+aiohttp==3.3.2
+aiodns==1.1.1

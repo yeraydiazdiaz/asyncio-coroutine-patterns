@@ -113,15 +113,23 @@ async def poll_top_stories_for_comments(loop, session, period, limit):
         fetch_counter = 0
         await asyncio.sleep(period)
 
+
+async def main(loop, period, limit):
+    """Async entry point coroutine.
+
+    """
+    async with aiohttp.ClientSession(loop=loop) as session:
+        comments = await poll_top_stories_for_comments(loop, session, period, limit)
+
+    return comments
+
+
 if __name__ == '__main__':
     args = parser.parse_args()
     if args.verbose:
         log.setLevel(logging.DEBUG)
 
     loop = asyncio.get_event_loop()
-    with aiohttp.ClientSession(loop=loop) as session:
-        loop.run_until_complete(
-            poll_top_stories_for_comments(
-                loop, session, args.period, args.limit))
+    loop.run_until_complete(main(loop, args.period, args.limit))
 
     loop.close()

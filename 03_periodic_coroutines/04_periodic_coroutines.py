@@ -44,7 +44,6 @@ class URLFetcher():
 
     async def fetch(self, session, url):
         """Fetch a URL using aiohttp returning parsed JSON response.
-
         As suggested by the aiohttp docs we reuse the session.
 
         """
@@ -82,22 +81,23 @@ async def post_number_of_comments(loop, session, fetcher, post_id):
     return number_of_comments
 
 
-async def get_comments_of_top_stories(loop, session, limit, iteration):
+async def get_comments_of_top_stories(loop, limit, iteration):
     """Retrieve top stories in HN.
 
     """
-    fetcher = URLFetcher()  # create a new fetcher for this task
-    response = await fetcher.fetch(session, TOP_STORIES_URL)
-    tasks = [post_number_of_comments(
-        loop, session, fetcher, post_id) for post_id in response[:limit]]
-    results = await asyncio.gather(*tasks)
-    for post_id, num_comments in zip(response[:limit], results):
-        log.info("Post {} has {} comments ({})".format(
-            post_id, num_comments, iteration))
-    return fetcher.fetch_counter  # return the fetch count
+    async with aiohttp.ClientSession(loop=loop) as session:
+        fetcher = URLFetcher()  # create a new fetcher for this task
+        response = await fetcher.fetch(session, TOP_STORIES_URL)
+        tasks = [post_number_of_comments(
+            loop, session, fetcher, post_id) for post_id in response[:limit]]
+        results = await asyncio.gather(*tasks)
+        for post_id, num_comments in zip(response[:limit], results):
+            log.info("Post {} has {} comments ({})".format(
+                post_id, num_comments, iteration))
+        return fetcher.fetch_counter  # return the fetch count
 
 
-def poll_top_stories_for_comments(loop, session, period, limit, iteration=0):
+def poll_top_stories_for_comments(loop, period, limit, iteration=0):
     """Periodic function that schedules get_comments_of_top_stories.
 
     """
@@ -105,7 +105,7 @@ def poll_top_stories_for_comments(loop, session, period, limit, iteration=0):
         limit, iteration))
 
     future = asyncio.ensure_future(
-        get_comments_of_top_stories(loop, session, limit, iteration))
+        get_comments_of_top_stories(loop, limit, iteration))
 
     now = datetime.now()
 
@@ -124,7 +124,7 @@ def poll_top_stories_for_comments(loop, session, period, limit, iteration=0):
         period,
         partial(  # or call_at(loop.time() + period)
             poll_top_stories_for_comments,
-            loop, session, period, limit, iteration
+            loop, period, limit, iteration
         )
     )
 
@@ -135,10 +135,11 @@ if __name__ == '__main__':
         log.setLevel(logging.DEBUG)
 
     loop = asyncio.get_event_loop()
-    with aiohttp.ClientSession(loop=loop) as session:
-        poll_top_stories_for_comments(
-            loop, session, args.period, args.limit)
 
-        loop.run_forever()
+    # we don't `run_until_complete` anymore, we simply call the function
+    poll_top_stories_for_comments(loop, args.period, args.limit)
+
+    # and run the loop forever
+    loop.run_forever()
 
     loop.close()

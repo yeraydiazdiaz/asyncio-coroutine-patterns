@@ -99,19 +99,29 @@ def id_from_HN_url(url):
         return None
 
 
+async def main(loop, post_id):
+    """Async entry point coroutine.
+
+    """
+    now = datetime.now()
+    async with aiohttp.ClientSession(loop=loop) as session:
+        comments = await post_number_of_comments(loop, session, post_id)
+        log.info(
+            '> Calculating comments took {:.2f} seconds and {} fetches'.format(
+                (datetime.now() - now).total_seconds(), fetch_counter))
+
+    return comments
+
+
 if __name__ == '__main__':
     args = parser.parse_args()
     if args.verbose:
         log.setLevel(logging.DEBUG)
 
     post_id = id_from_HN_url(args.url) if args.url else args.id
+
     loop = asyncio.get_event_loop()
-    with aiohttp.ClientSession(loop=loop) as session:
-        now = datetime.now()
-        comments = loop.run_until_complete(
-            post_number_of_comments(loop, session, post_id))
-        log.info(
-            '> Calculating comments took {:.2f} seconds and {} fetches'.format(
-                (datetime.now() - now).total_seconds(), fetch_counter))
-        log.info("-- Post {} has {} comments".format(post_id, comments))
+    comments = loop.run_until_complete(main(loop, post_id))
+    log.info("-- Post {} has {} comments".format(post_id, comments))
+
     loop.close()
